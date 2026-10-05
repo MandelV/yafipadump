@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Dump artifacts (généré à l'exécution, contenu de l'app analysée)
+dump.bin
+dump.asm
