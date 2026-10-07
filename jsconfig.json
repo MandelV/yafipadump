@@ -1,8 +1,0 @@
-{
-  "compilerOptions": {
-    "target": "es2020",
-    "types": ["frida-gum", "frida-objc-bridge", "frida-java-bridge"],
-    "checkJs": true
-  },
-  "include": ["agents/**/*.js"]
-}

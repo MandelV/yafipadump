@@ -6,6 +6,9 @@ __pycache__/
 # Node
 node_modules/
 
+# Compiled Frida agent (généré par frida-compile)
+_agent.js
+
 # Dump artifacts (généré à l'exécution, contenu de l'app analysée)
 dump.bin
 dump.asm

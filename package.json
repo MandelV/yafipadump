@@ -1,18 +1,19 @@
 {
-  "name": "yafipadump",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "devDependencies": {
-    "@types/frida-gum": "^19.12.0",
-    "frida-java-bridge": "^7.0.13",
-    "frida-objc-bridge": "^8.0.6"
-  }
+    "name": "yafipadump",
+    "version": "1.0.0",
+    "description": "",
+    "scripts": {
+        "build": "frida-compile agent/dumper.ts -o _agent.js -T none",
+        "watch": "frida-compile agent/dumper.ts -o _agent.js -T none -w",
+        "typecheck": "tsc --noEmit"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "type": "commonjs",
+    "devDependencies": {
+        "@types/frida-gum": "^19.0.0",
+        "frida-compile": "^19.0.5",
+        "typescript": "^5.7.0"
+    }
 }

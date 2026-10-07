@@ -110,7 +110,7 @@ try:
 
     session = spawn_and_attach_to_target(device, target)
 
-    script = run_script_into_session(session, "agents/dumper.js", on_message)
+    script = run_script_into_session(session, "_agent.js", on_message)
 
     if not dump_done.wait(timeout=10):
         error("Timeout: aucun dump reçu après 10s")
