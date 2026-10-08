@@ -1,70 +1,12 @@
-import {
-    MH_MAGIC,
-    MH_MAGIC_64,
-    MACH_HEADER,
-    LC,
-    getLcName,
-    type LoadCommand,
-    type MachOHeader,
-    type EncryptionInfoCommand,
-    type DecryptedSection,
-} from "./macho";
-
-console.log("DUMPER AGENT LOADED");
-
-function getErrorMessage(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
-}
+import { MH_MAGIC, MH_MAGIC_64, MACH_HEADER, LC, getLcName, type LoadCommand, type MachOHeader, type EncryptionInfoCommand, type DecryptedSection, EncryptionInfoCommandOffset } from "./macho";
+import ObjC from "frida-objc-bridge";
+import { ModuleDumpMetadata } from "./shared";
+import { getErrorMessage } from "./helpers";
 
 /**
- * Parcourt une liste de ranges mémoire exécutables à la recherche d'un header Mach-O
- * (reconnu via son magic number en tout début de range).
- */
-function findMachoHeaderAddress(ranges: RangeDetails[]): MachOHeader | null {
-    for (const range of ranges) {
-        let magic: number;
-
-        try {
-            magic = range.base.readU32();
-        } catch (err) {
-            console.log(`[-] Impossible de lire la range ${range.base}, ignorée (${getErrorMessage(err)})`);
-            continue;
-        }
-
-        if (magic === MH_MAGIC_64) {
-            return { headerAddr: range.base, arch: "x64" };
-        }
-
-        if (magic === MH_MAGIC) {
-            return { headerAddr: range.base, arch: "x86" };
-        }
-    }
-
-    return null;
-}
-
-function findModuleByName(moduleName: string): Module | null {
-    let modules: Module[];
-
-    try {
-        modules = Process.enumerateModules();
-    } catch (err) {
-        console.log(`[-] Impossible d'énumérer les modules du process (${getErrorMessage(err)})`);
-        return null;
-    }
-
-    for (const module of modules) {
-        if (module.name === moduleName) {
-            return module;
-        }
-    }
-
-    return null;
-}
-
-/**
- * Mach-O load commands are instructions in the Mach-O file
- * format that tell the operating system loader (dyld) how to set up, map, and run a binary.
+ * Parse la table des load commands à partir du header Mach-O.
+ * Chaque load command est lue séquentiellement : son type et sa taille déterminent
+ * le curseur vers la suivante. Une taille nulle indique une table corrompue.
  */
 function readLoadCommands(headerAddress: NativePointer, ncmds: number): LoadCommand[] {
     let cmdCursor = headerAddress.add(MACH_HEADER.SIZE_64);
@@ -98,98 +40,139 @@ function readLoadCommands(headerAddress: NativePointer, ncmds: number): LoadComm
     return cmds;
 }
 
+/**
+ * Extrait les champs de chiffrement (cryptoff, cryptsize, cryptid) depuis une
+ * load command LC_ENCRYPTION_INFO ou LC_ENCRYPTION_INFO_64.
+ * Ces champs délimitent la zone chiffrée par FairPlay dans le binaire.
+ */
 function readEncryptionInfoCommand(loadCommand: LoadCommand): EncryptionInfoCommand {
-    if (loadCommand.cmdType !== LC.LC_ENCRYPTION_INFO_64) {
-        throw new Error(`Load command attendue: LC_ENCRYPTION_INFO_64 (0x${LC.LC_ENCRYPTION_INFO_64.toString(16)}), reçue: ${loadCommand.cmdName} (0x${loadCommand.cmdType.toString(16)})`);
+    if (loadCommand.cmdType === LC.LC_ENCRYPTION_INFO || loadCommand.cmdType === LC.LC_ENCRYPTION_INFO_64) {
+        const baseAddress = loadCommand.cmdAddress;
+
+        let cryptoff: number;
+        let cryptsize: number;
+        let cryptid: number;
+        let pad: number;
+
+        try {
+            cryptoff = baseAddress.add(EncryptionInfoCommandOffset.cryptoff).readU32();
+            cryptsize = baseAddress.add(EncryptionInfoCommandOffset.cryptsize).readU32();
+            cryptid = baseAddress.add(EncryptionInfoCommandOffset.cryptid).readU32();
+            pad = baseAddress.add(EncryptionInfoCommandOffset.pad).readU32();
+        } catch (err) {
+            throw new Error(`Lecture impossible de encryption_info_command_64 à ${baseAddress}: ${getErrorMessage(err)}`);
+        }
+
+        return {
+            cmd: loadCommand,
+            cryptoff,
+            cryptsize,
+            cryptid,
+            pad,
+            toString() {
+                return JSON.stringify(this);
+            },
+        };
+    } else {
+        throw new Error(`expect LC_ENCRYPTION_INFO_64 or LC_ENCRYPTION_INFO cmd - ${loadCommand.cmdName}:${loadCommand.cmdType} given.`);
     }
-
-    const baseAddress = loadCommand.cmdAddress;
-
-    let cryptoff: number;
-    let cryptsize: number;
-    let cryptid: number;
-    let pad: number;
-
-    try {
-        cryptoff = baseAddress.add(0x08).readU32();
-        cryptsize = baseAddress.add(0x0c).readU32();
-        cryptid = baseAddress.add(0x10).readU32();
-        pad = baseAddress.add(0x14).readU32();
-    } catch (err) {
-        throw new Error(`Lecture impossible de encryption_info_command_64 à ${baseAddress}: ${getErrorMessage(err)}`);
-    }
-
-    return {
-        cmd: loadCommand,
-        cryptoff,
-        cryptsize,
-        cryptid,
-        pad,
-        toString() {
-            return JSON.stringify(this);
-        },
-    };
 }
 
-function readDecryptedTextSectionInTextSection(
-    baseAddress: NativePointer,
-    cryptOffset: number,
-    cryptsize: number,
-): DecryptedSection {
+/**
+ * Lit la section __TEXT déchiffrée en mémoire. À ce stade, dyld a déjà déchiffré
+ * le binaire FairPlay : on lit donc directement les octets en clair depuis
+ * l'espace mémoire du processus, à l'offset indiqué par la load command.
+ */
+function readDecryptedTextSectionInTextSection(baseAddress: NativePointer, cryptOffset: number, cryptsize: number): DecryptedSection {
     const decryptedCodeAddress = baseAddress.add(cryptOffset);
     const plainBytes = decryptedCodeAddress.readByteArray(cryptsize);
-
     return { address: decryptedCodeAddress, bytes: plainBytes };
 }
 
-function sendBackDataToWrapper(address: NativePointer, bytes: ArrayBuffer, size: number): void {
-    console.log(`[i] Send data back to python ${size} bytes @ ${address}`);
-    send({ event: "dump", address: address.toString(), size }, bytes);
+/** Lit le champ ncmds du header Mach-O pour connaître le nombre de load commands. */
+function readTheNumberOfLoadCommand(module: Module): number {
+    const baseAddress = module.base;
+    const ncmds = baseAddress.add(MACH_HEADER.NCMDS_OFFSET).readU32();
+
+    return ncmds;
 }
 
-
-
-//DUMPER ENCRYPTED code in __TEXT 
-try {
-    const TARGET_MODULE_NAME = "EchoBack";
-
-    const module = findModuleByName(TARGET_MODULE_NAME);
+/**
+ * Orchestre le dump du module principal : parse les load commands, localise la
+ * section chiffrée FairPlay, et retourne les octets déchiffrés avec les métadonnées
+ * associées. Retourne null si le binaire n'a pas de section chiffrée.
+ */
+function dumpEncryptedDataText(module: Module): [ModuleDumpMetadata, ArrayBuffer] | null {
     if (!module) {
-        throw new Error(`Module "${TARGET_MODULE_NAME}" introuvable dans le process`);
+        throw new Error(`Module introuvable dans le process`);
     }
 
-    // const ranges = module.enumerateRanges("r-x");
-    // const headerInfo = findMachoHeaderAddress(ranges);
-    // if (!headerInfo) {
-    //     throw new Error(`Aucun header Mach-O trouvé dans les ranges exécutables de "${TARGET_MODULE_NAME}"`);
-    // }
-
     const baseAddress = module.base;
-    console.log(`[+] Header Mach-o find at (addr): ${baseAddress}`);
 
-    const ncmds = baseAddress.add(MACH_HEADER.NCMDS_OFFSET).readU32();
-    console.log(`[i] Nombre de load commandes 0x${ncmds.toString(16)}`);
+    const ncmds = readTheNumberOfLoadCommand(module);
 
     const loadCmds = readLoadCommands(baseAddress, ncmds);
 
-    const encryptCmds = loadCmds.find(
-        (cmd) => cmd.cmdType === LC.LC_ENCRYPTION_INFO_64,
-    );
+    const encryptCmds = loadCmds.find((cmd) => cmd.cmdType === LC.LC_ENCRYPTION_INFO_64 || cmd.cmdType === LC.LC_ENCRYPTION_INFO);
 
     if (encryptCmds) {
-        console.log(`[+] LC_ENCRYPTION_INFO_64 CMD found  ${encryptCmds.cmdName} (0x${encryptCmds.cmdType.toString(16)}) at ${encryptCmds.cmdAddress} - size:${encryptCmds.cmdSize}`);
         const encryptionInfoCommand = readEncryptionInfoCommand(encryptCmds);
-        console.log(`[+] output encryption_info_command :`);
-        console.log(encryptionInfoCommand.toString());
-
-        console.log(`[i] Read Plain section :`);
 
         const plainSection = readDecryptedTextSectionInTextSection(baseAddress, encryptionInfoCommand.cryptoff, encryptionInfoCommand.cryptsize);
-        if (plainSection.bytes) sendBackDataToWrapper(plainSection.address, plainSection.bytes, encryptionInfoCommand.cryptsize);
+
+        return [
+            {
+                moduleBase: module.base,
+                moduleName: module.name,
+                modulePath: module.path,
+                moduleSize: module.size,
+                address: plainSection.address,
+                cryptoff: encryptionInfoCommand.cryptoff,
+                cryptsize: encryptionInfoCommand.cryptsize,
+                cryptid: encryptionInfoCommand.cryptid,
+            },
+            plainSection.bytes ?? new ArrayBuffer(0),
+        ];
     }
-} catch (err) {
-    console.log(`[-] ${getErrorMessage(err)}`);
-    if (err instanceof Error) {
-        console.log(err.stack);
-    }
+    return null;
 }
+
+/** Points d'entrée RPC exposés au host Python via Frida. */
+rpc.exports = {
+    /** Liste les modules chargés dont le path contient "Echo" (debug). */
+    prepareTheExtraction() {
+        const modules = Process.enumerateModules();
+
+        for (const module of modules) {
+            if (module.path.includes("Echo")) console.log(`[i] Module found : ${module.name} at ${module.path}`);
+        }
+    },
+
+    /** Retourne le chemin filesystem du binaire principal sur l'appareil. */
+    getModulePath(): string {
+        const mainModule = Process.mainModule;
+        const mainModulePath = mainModule.path;
+        return mainModulePath;
+    },
+    /** Dump la section chiffrée FairPlay du module principal, déjà déchiffrée en mémoire par dyld. */
+    dumpModule() {
+        try {
+            const mainModule = Process.mainModule;
+
+            return dumpEncryptedDataText(mainModule);
+        } catch (err) {
+            console.log(`[-] ${getErrorMessage(err)}`);
+        }
+    },
+};
+
+// recv("config", (message) => {
+//     try {
+//         dumpModule(message.payload as AgentConfig);
+//     } catch (err) {
+//         console.log(`[-] ${getErrorMessage(err)}`);
+//         if (err instanceof Error) {
+//             console.log(err.stack);
+//         }
+//     }
+// });

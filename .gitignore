@@ -12,3 +12,5 @@ _agent.js
 # Dump artifacts (généré à l'exécution, contenu de l'app analysée)
 dump.bin
 dump.asm
+
+dump/

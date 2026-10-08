@@ -131,6 +131,24 @@ export interface MachOHeader {
  *     uint32_t pad;       // 0x14 - padding to make this struct's size a multiple of 8 bytes
  * };
  */
+export const EncryptionInfoCommandOffset = {
+    cmd: 0x00,
+    cmdsize: 0x04,
+    cryptoff: 0x08,
+    cryptsize: 0x0c,
+    cryptid: 0x10,
+    pad: 0x14,
+} as const;
+/**
+ * struct encryption_info_command_64 {
+ *     uint32_t cmd;       // 0x00 - LC_ENCRYPTION_INFO_64
+ *     uint32_t cmdsize;   // 0x04
+ *     uint32_t cryptoff;  // 0x08 - file offset of encrypted range
+ *     uint32_t cryptsize; // 0x0C - file size of encrypted range
+ *     uint32_t cryptid;   // 0x10 - which encryption system, 0 means not-encrypted yet
+ *     uint32_t pad;       // 0x14 - padding to make this struct's size a multiple of 8 bytes
+ * };
+ */
 export interface EncryptionInfoCommand {
     cmd: LoadCommand;
     cryptoff: number;

@@ -14,6 +14,7 @@
     "devDependencies": {
         "@types/frida-gum": "^19.0.0",
         "frida-compile": "^19.0.5",
+        "frida-objc-bridge": "^8.0.6",
         "typescript": "^5.7.0"
     }
 }
