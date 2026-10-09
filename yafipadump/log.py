@@ -12,17 +12,17 @@ console = Console()
 
 
 def info(msg: str):
-    """Message informatif (bleu) — étape en cours."""
+    """Message informatif (bleu) -- étape en cours."""
     console.print(f"  [bold blue]\\[\\*][/] {msg}")
 
 
 def success(msg: str):
-    """Message de succès (vert) — étape terminée."""
+    """Message de succès (vert) -- étape terminée."""
     console.print(f"  [bold green]\\[+][/] {msg}")
 
 
 def error(msg: str):
-    """Message d'erreur (rouge) — quelque chose a échoué."""
+    """Message d'erreur (rouge) -- quelque chose a échoué."""
     console.print(f"  [bold red]\\[-][/] {msg}")
 
 
@@ -38,7 +38,7 @@ def module_banner(index: int, total: int, name: str, is_main: bool):
     kind = "main binary" if is_main else "framework"
     console.print()
     console.rule(
-        f"[bold yellow]Module {index + 1}/{total}[/] — [bold white]{name}[/] [dim]({kind})[/]",
+        f"[bold yellow]Module {index + 1}/{total}[/] -- [bold white]{name}[/] [dim]({kind})[/]",
         style="yellow",
     )
     console.print()
@@ -64,7 +64,7 @@ def module_info(meta: dict):
         )
         table.add_row(
             "Crypt zone",
-            f"[cyan]{enc_info['cryptoff']:#010x}[/] — "
+            f"[cyan]{enc_info['cryptoff']:#010x}[/] -- "
             f"[yellow]{enc_info['cryptsize']:,}[/] bytes",
         )
     else:

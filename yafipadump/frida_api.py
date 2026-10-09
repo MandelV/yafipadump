@@ -45,14 +45,14 @@ class FridaAgentAPI:
         toujours à l'index 0.
 
         Returns:
-            Nombre de modules trouvés — le caller itérera de 0 à n-1 via dump_module(i).
+            Nombre de modules trouvés -- le caller itérera de 0 à n-1 via dump_module(i).
         """
         return self._exports.prepare_the_extraction()
 
     def dump_module(self, index: int) -> tuple[ModuleMetaDataDict, bytes] | None:
         """Phase 2 : parse le header Mach-O et lit les octets déchiffrés pour un module.
 
-        C'est ici que le readByteArray() a lieu côté device — un seul module
+        C'est ici que le readByteArray() a lieu côté device -- un seul module
         à la fois pour ne pas exploser la mémoire.
 
         Frida transmet le tuple JS [Object, ArrayBuffer] en Python comme [dict, bytes].
@@ -66,7 +66,7 @@ class FridaAgentAPI:
         result = self._exports.dump_modules(index)
         if result is None:
             return None
-        # Frida retourne une liste [dict, bytes] — on unpack et on type
+        # Frida retourne une liste [dict, bytes] -- on unpack et on type
         meta: ModuleMetaDataDict = result[0]
         data: bytes = result[1]
         return meta, data

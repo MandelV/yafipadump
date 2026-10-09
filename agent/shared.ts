@@ -52,7 +52,7 @@ export interface DecryptedSectionMeta {
  * Champs extraits de la load command encryption_info_command_64 (ou 32-bit).
  * Décrit la zone du binaire chiffrée par FairPlay DRM.
  *
- * @see EXTERNAL_HEADERS/mach-o/loader.h — struct encryption_info_command_64
+ * @see EXTERNAL_HEADERS/mach-o/loader.h -- struct encryption_info_command_64
  */
 export interface LcEncryptionInfo {
     /** Offset dans le fichier Mach-O où commence la zone chiffrée. */

@@ -1,4 +1,4 @@
-"""Classe Yafi — orchestrateur du dump FairPlay iOS.
+"""Classe Yafi -- orchestrateur du dump FairPlay iOS.
 
 Yafi gère le cycle de vie complet d'une extraction :
   1. Connexion USB au device jailbreaké
@@ -41,19 +41,19 @@ class Yafi:
         self.agent_path = agent_path
         self.ssh_host = ssh_host
 
-        # État Frida — initialisé par connect() et spawn_and_attach()
+        # État Frida -- initialisé par connect() et spawn_and_attach()
         self.device: frida.Device = None
         self.session: frida.Session = None
         self.api: FridaAgentAPI | None = None
 
-        # Infos du module principal — initialisées par get_module_path()
+        # Infos du module principal -- initialisées par get_module_path()
         self.module_path: PurePosixPath | None = None
         self.module_name: str | None = None
 
         # Compteur de modules trouvés par prepare_extraction()
         self.module_count: int = 0
 
-        # Répertoire de dump local — initialisé par dump_all_modules()
+        # Répertoire de dump local -- initialisé par dump_all_modules()
         self.dump_dir: Path | None = None
 
     # --- Connexion et lifecycle Frida ---
@@ -134,7 +134,10 @@ class Yafi:
 
         L'agent parse le header Mach-O et, si le module est chiffré FairPlay,
         lit les octets déchiffrés depuis la mémoire (readByteArray).
-        C'est l'étape coûteuse en mémoire — un seul module à la fois.
+        C'est l'étape coûteuse en mémoire -- un seul module à la fois.
+
+        Si le module est chiffré, écrit aussi le dump brut + désassemblage
+        ARM64 dans ./dump/<bundle_id>/<module_name>/ pour analyse offline.
         """
         result = self.api.dump_module(index)
         if result is None:
@@ -161,10 +164,18 @@ class Yafi:
 
         Opère sur le fichier copié localement (dans self.dump_dir), pas sur le device.
         Skip les modules non chiffrés (dev builds, modules système, etc.).
+
+        Pré-validations (ici, avant le patch) :
+          - cryptoff du fichier == cryptoff vu en mémoire par l'agent
+            (détecte un fichier modifié ou un FAT binary avec la mauvaise slice)
+          - taille du dump == cryptsize du fichier
+            (détecte une troncature lors du transfert RPC Frida)
+
+        Le patch lui-même est atomique -- voir patch_binary() dans macho.py.
         """
         enc_info = meta.get("LcEncryptionInfo")
         if not meta.get("isEncrypted") or enc_info is None:
-            info(f"Not encrypted — skipping patch")
+            info(f"Not encrypted -- skipping patch")
             return
         
         binary_path = str(self.dump_dir / meta["moduleAppDir"])
@@ -186,7 +197,7 @@ class Yafi:
         mem_hash, bi = patch_binary(binary_path, data, arch)
         print_report("After Patch", "green", bi, mem_cryptoff, mem_hash)
 
-        # Validation rapide via `file` — doit afficher "Mach-O 64-bit executable arm64"
+        # Validation rapide via `file` -- doit afficher "Mach-O 64-bit executable arm64"
         result = subprocess.run(["file", binary_path], capture_output=True, text=True)
         console.rule("[bold cyan]Validation")
         console.print(f"  {result.stdout.strip()}")
@@ -194,10 +205,19 @@ class Yafi:
     def dump_all_modules(self):
         """Orchestre le dump complet de tous les modules du .app bundle.
 
-        Pipeline :
-          1. Setup — connexion, injection agent, discovery
-          2. Transfer — copie du .app bundle depuis le device
-          3. Dump — pour chaque module : extraction mémoire + patch fichier
+        Pipeline en 3 phases :
+          1. Setup -- injection de l'agent JS, discovery des modules via RPC
+          2. Transfer -- copie du .app bundle entier depuis le device via scp
+             (on copie TOUT le bundle, pas juste les binaires, pour avoir les
+             ressources, frameworks, Info.plist, etc. -- nécessaire pour que
+             le .app résultant soit analysable / resignable)
+          3. Dump & Patch -- pour chaque module :
+             a. L'agent lit les octets déchiffrés depuis la mémoire du process
+             b. On écrit le dump brut + désassemblage ARM64 pour archive
+             c. On patche le binaire copié localement (crypt section + cryptid)
+
+        Le process cible reste vivant pendant toute la durée -- Frida a besoin
+        d'y lire la mémoire. Il est tué par le caller (finally dans __main__.py).
         """
         # --- Phase 1 : Setup ---
         phase("Setup", "bold cyan")

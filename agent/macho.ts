@@ -21,14 +21,14 @@ export const MH_MAGIC_64 = 0xfeedfacf; // Mach-O 64-bit (tous les binaires iOS m
  * Les load commands suivent immédiatement après, à base + SIZE_64 (0x20).
  *
  * struct mach_header_64 {
- *     uint32_t       magic;        // 0x00 — identifie l'archi (0xfeedfacf = 64-bit)
- *     cpu_type_t     cputype;      // 0x04 — type CPU (ex: CPU_TYPE_ARM64 = 0x100000C)
- *     cpu_subtype_t  cpusubtype;   // 0x08 — sous-type CPU
- *     uint32_t       filetype;     // 0x0C — type de fichier (MH_EXECUTE, MH_DYLIB, …)
- *     uint32_t       ncmds;        // 0x10 — nombre de load commands qui suivent
- *     uint32_t       sizeofcmds;   // 0x14 — taille totale de toutes les load commands
- *     uint32_t       flags;        // 0x18 — flags (PIE, TWOLEVEL, …)
- *     uint32_t       reserved;     // 0x1C — réservé (absent en 32-bit)
+ *     uint32_t       magic;        // 0x00 -- identifie l'archi (0xfeedfacf = 64-bit)
+ *     cpu_type_t     cputype;      // 0x04 -- type CPU (ex: CPU_TYPE_ARM64 = 0x100000C)
+ *     cpu_subtype_t  cpusubtype;   // 0x08 -- sous-type CPU
+ *     uint32_t       filetype;     // 0x0C -- type de fichier (MH_EXECUTE, MH_DYLIB, …)
+ *     uint32_t       ncmds;        // 0x10 -- nombre de load commands qui suivent
+ *     uint32_t       sizeofcmds;   // 0x14 -- taille totale de toutes les load commands
+ *     uint32_t       flags;        // 0x18 -- flags (PIE, TWOLEVEL, …)
+ *     uint32_t       reserved;     // 0x1C -- réservé (absent en 32-bit)
  * };
  * sizeof(mach_header_64) == 0x20 (32 octets)
  */
@@ -41,7 +41,7 @@ export const MACH_HEADER = {
     SIZEOFCMDS_OFFSET: 0x14,
     FLAGS_OFFSET: 0x18,
     RESERVED_OFFSET: 0x1c,
-    SIZE_64: 0x20, // Taille totale du header — les load commands commencent juste après
+    SIZE_64: 0x20, // Taille totale du header -- les load commands commencent juste après
 } as const;
 
 // --- Load command constants (loader.h:252+) ---
@@ -98,7 +98,7 @@ export const LC = {
     LC_DATA_IN_CODE: 0x29,
     LC_SOURCE_VERSION: 0x2a,
     LC_DYLIB_CODE_SIGN_DRS: 0x2b,
-    LC_ENCRYPTION_INFO_64: 0x2c, // FairPlay 64-bit — la commande qu'on cherche pour le dump
+    LC_ENCRYPTION_INFO_64: 0x2c, // FairPlay 64-bit -- la commande qu'on cherche pour le dump
     LC_LINKER_OPTION: 0x2d,
     LC_LINKER_OPTIMIZATION_HINT: 0x2e,
     LC_VERSION_MIN_TVOS: 0x2f,
@@ -123,6 +123,12 @@ export function getLcName(cmdType: number): string {
 /**
  * Représentation d'une load command parsée depuis le header Mach-O.
  * Chaque load command commence par { uint32 cmd; uint32 cmdsize; } (loader.h:247).
+ *
+ * struct load_command {
+ *     uint32_t cmd;		//type of load command
+ *     uint32_t cmdsize;	// total size of command in bytes
+ * };
+ *
  */
 export interface LoadCommand {
     /** Type de commande (valeur numérique, ex: LC.LC_SEGMENT_64 = 0x19). */
@@ -154,17 +160,17 @@ export interface MachOHeader {
  * fairplayd (HOST_FAIRPLAYD_PORT). C'est pourquoi en mémoire, à ce stade,
  * les octets à base+cryptoff sont déjà en clair.
  *
- * @see xnu/bsd/sys/mman.h — CRYPTID_NO_ENCRYPTION / CRYPTID_APP_ENCRYPTION
- * @see xnu/osfmk/vm/vm_protos.h — vm_map_apple_protected()
- * @see xnu/osfmk/kern/page_decrypt.h — text_crypter_create_hook_t
+ * @see xnu/bsd/sys/mman.h -- CRYPTID_NO_ENCRYPTION / CRYPTID_APP_ENCRYPTION
+ * @see xnu/osfmk/vm/vm_protos.h -- vm_map_apple_protected()
+ * @see xnu/osfmk/kern/page_decrypt.h -- text_crypter_create_hook_t
  *
  * struct encryption_info_command_64 {
- *     uint32_t cmd;       // 0x00 — LC_ENCRYPTION_INFO_64
- *     uint32_t cmdsize;   // 0x04 — sizeof(struct) = 24
- *     uint32_t cryptoff;  // 0x08 — offset fichier du début de la zone chiffrée
- *     uint32_t cryptsize; // 0x0C — taille de la zone chiffrée
- *     uint32_t cryptid;   // 0x10 — système de chiffrement (0 = non chiffré)
- *     uint32_t pad;       // 0x14 — alignement 8 octets (64-bit seulement)
+ *     uint32_t cmd;       // 0x00 -- LC_ENCRYPTION_INFO_64
+ *     uint32_t cmdsize;   // 0x04 -- sizeof(struct) = 24
+ *     uint32_t cryptoff;  // 0x08 -- offset fichier du début de la zone chiffrée
+ *     uint32_t cryptsize; // 0x0C -- taille de la zone chiffrée
+ *     uint32_t cryptid;   // 0x10 -- système de chiffrement (0 = non chiffré)
+ *     uint32_t pad;       // 0x14 -- alignement 8 octets (64-bit seulement)
  * };
  */
 export const EncryptionInfoCommandOffset = {
@@ -192,7 +198,7 @@ export interface EncryptionInfoCommand {
 }
 
 /**
- * Représentation d'un segment_command_64 (loader.h — LC_SEGMENT_64).
+ * Représentation d'un segment_command_64 (loader.h -- LC_SEGMENT_64).
  *
  * Décrit un segment du binaire à mapper dans l'espace d'adressage 64-bit.
  * Le segment __TEXT contient le code exécutable (et la zone chiffrée FairPlay).

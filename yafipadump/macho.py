@@ -4,7 +4,20 @@ Utilise lief pour parser les headers Mach-O et accéder aux métadonnées
 de chiffrement FairPlay (LC_ENCRYPTION_INFO[_64]).
 
 Ce module opère sur les fichiers copiés du device (post-scp), pas
-sur la mémoire du process — le dump mémoire est géré côté agent Frida.
+sur la mémoire du process -- le dump mémoire est géré côté agent Frida.
+
+Architecture du patching :
+    1. L'appelant (yafi.py) fait les pré-validations (cryptoff match, taille match)
+    2. patch_binary() orchestre la transaction atomique :
+       - mkstemp crée un fichier temp sur le même filesystem (requis pour os.replace atomique)
+       - shutil.copy2 copie l'original (contenu + métadonnées)
+       - _patch_crypt_section() écrit les octets déchiffrés dans le temp
+       - _patch_cryptid() met cryptid à 0 dans le temp
+       - fsync force l'écriture sur disque avant vérification
+       - get_binary_info() relit le temp pour vérifier SHA-256 + cryptid
+       - os.replace() remplace l'original atomiquement (rename POSIX)
+       - finally: supprime le temp dans tous les cas
+    3. Si quoi que ce soit échoue, l'original reste intact
 """
 import hashlib
 import os
@@ -52,7 +65,10 @@ ENCRYPTION_INFO_PAD = 0x14
 # --- Parse ---
 
 
-FRIDA_ARCH_TO_CPU_TYPE = {
+# Mapping des noms d'architecture Frida (Process.arch) vers les CPU_TYPE lief.
+# Frida utilise ses propres noms ("arm64", "x64", "ia32", "arm"),
+# tandis que lief utilise les constantes Mach-O du kernel (CPU_TYPE_ARM64, etc.).
+FRIDA_ARCH_TO_CPU_TYPE: dict[str, lief.MachO.Header.CPU_TYPE] = {
     "arm64": lief.MachO.Header.CPU_TYPE.ARM64,
     "arm": lief.MachO.Header.CPU_TYPE.ARM,
     "x64": lief.MachO.Header.CPU_TYPE.X86_64,
@@ -60,19 +76,23 @@ FRIDA_ARCH_TO_CPU_TYPE = {
 }
 
 
-def parse_macho(path: str, arch: str):
+def parse_macho(path: str, arch: str) -> tuple[lief.MachO.FatBinary, lief.MachO.Binary]:
     """Parse un binaire Mach-O et retourne la slice correspondant à l'architecture.
 
-    Pour un FAT/Universal binary, sélectionne la slice via fat.get(CPU_TYPE)
-    plutôt que de prendre aveuglément l'index 0.
-    Pour un thin binary, fat.get() retourne l'unique slice.
+    lief.MachO.parse() retourne toujours un FatBinary, même pour un thin binary
+    (dans ce cas il contient une seule slice). fat.get(CPU_TYPE) sélectionne
+    la bonne slice par architecture au lieu de fat.at(0) qui prendrait
+    aveuglément la première -- important pour les Universal binaries
+    (ex: arm64 + arm64e, ou arm64 + x86_64 dans les simulateurs).
 
     Args:
-        path: chemin du fichier Mach-O
-        arch: architecture Frida du process (ex: "arm64", "x64")
+        path: chemin du fichier Mach-O sur disque
+        arch: architecture Frida du process (Process.arch côté JS,
+              ex: "arm64", "arm", "x64", "ia32")
 
     Returns:
-        (fat_binary, matching_slice)
+        (fat_binary, matching_slice) -- le FatBinary complet et le Binary
+        de la slice correspondant à l'architecture demandée
     """
     cpu_type = FRIDA_ARCH_TO_CPU_TYPE.get(arch)
     if cpu_type is None:
@@ -89,12 +109,16 @@ def parse_macho(path: str, arch: str):
     return fat, binary
 
 
-def read_crypt_section(path: str, binary) -> bytes:
+def read_crypt_section(path: str, binary: lief.MachO.Binary) -> bytes:
     """Lit les octets de la zone chiffrée directement depuis le fichier sur disque.
 
-    Le seek additionne fat_offset (offset de la slice dans un FAT/Universal binary,
-    0 pour un thin binary) et crypt_offset pour atteindre la zone chiffrée quelle
-    que soit la structure du conteneur.
+    Position dans le fichier = fat_offset + crypt_offset :
+      - fat_offset : offset de la slice dans le conteneur FAT (0 pour un thin binary)
+      - crypt_offset : offset de la zone chiffrée dans la slice (champ de LC_ENCRYPTION_INFO)
+
+    On lit depuis le fichier sur disque (pas la mémoire du process) -- ces octets
+    sont encore chiffrés à ce stade. Sert à calculer le hash pré-patch et
+    vérifier l'intégrité post-patch.
     """
     enc = binary.encryption_info
     with open(path, "rb") as f:
@@ -125,7 +149,21 @@ def get_binary_info(path: str, arch: str) -> BinaryInfo:
 
 
 def _patch_crypt_section(f, fat_offset: int, cryptoff: int, dump_bytes: bytes) -> int:
-    """Écrase la zone chiffrée par les octets déchiffrés dans un file handle ouvert."""
+    """Écrase la zone chiffrée par les octets déchiffrés dans un file handle ouvert.
+
+    Écrit à la position fat_offset + cryptoff -- c'est l'adresse absolue dans
+    le fichier, que ce soit un thin ou un FAT binary.
+    Vérifie que tous les octets ont été écrits (protection contre écriture partielle).
+
+    Args:
+        f: file handle ouvert en mode "r+b"
+        fat_offset: offset de la slice dans le FAT (0 pour thin binary)
+        cryptoff: offset de la zone chiffrée dans la slice
+        dump_bytes: octets déchiffrés à écrire (lus depuis la mémoire du process via Frida)
+
+    Returns:
+        Nombre d'octets écrits
+    """
     f.seek(fat_offset + cryptoff)
     nbw = f.write(dump_bytes)
     if nbw != len(dump_bytes):
@@ -134,7 +172,21 @@ def _patch_crypt_section(f, fat_offset: int, cryptoff: int, dump_bytes: bytes) -
 
 
 def _patch_cryptid(f, cryptid_offset: int):
-    """Met cryptid à 0 dans un file handle ouvert."""
+    """Met le champ cryptid à 0 dans un file handle ouvert.
+
+    cryptid indique au kernel si le binaire est chiffré :
+      - cryptid > 0 → le kernel appelle FairPlay pour déchiffrer au chargement
+      - cryptid == 0 → le kernel charge le code tel quel
+
+    Après avoir écrit les octets en clair dans la zone chiffrée, il FAUT
+    mettre cryptid à 0, sinon le kernel tenterait de "déchiffrer" du code
+    déjà en clair → corruption + crash au lancement.
+
+    Args:
+        f: file handle ouvert en mode "r+b"
+        cryptid_offset: position absolue du champ cryptid dans le fichier
+                        (fat_offset + command_offset + ENCRYPTION_INFO_CRYPTID)
+    """
     f.seek(cryptid_offset)
     nbw = f.write((0).to_bytes(4, "little"))
     if nbw != 4:
@@ -205,7 +257,7 @@ def patch_binary(path: str, mem_dump: bytes | list, arch: str) -> tuple[str, Bin
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
-    success(f"Patch applied @ [cyan]{bi.cryptoff:#010x}[/] — [yellow]{nbw}[/] bytes written")
+    success(f"Patch applied @ [cyan]{bi.cryptoff:#010x}[/] -- [yellow]{nbw}[/] bytes written")
     success("cryptid zeroed out")
     success("Integrity verified: file crypt section == memory dump")
 

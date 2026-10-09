@@ -8,11 +8,11 @@ import { dirname, getErrorMessage, nullData } from "./helpers";
  * En mémoire le layout est :
  *   [mach_header_64 (0x20 octets)] [LC #0] [LC #1] ... [LC #ncmds-1]
  *
- * Chaque load command commence par { uint32 cmd; uint32 cmdsize; } —
+ * Chaque load command commence par { uint32 cmd; uint32 cmdsize; } --
  * cmdsize donne la taille totale de la commande (header inclus), donc
  * le curseur avance de cmdsize pour passer à la suivante.
  *
- * @see EXTERNAL_HEADERS/mach-o/loader.h — struct load_command
+ * @see EXTERNAL_HEADERS/mach-o/loader.h -- struct load_command
  */
 function readLoadCommands(headerAddress: NativePointer, ncmds: number): LoadCommand[] {
     // La première load command suit immédiatement le header (sizeof(mach_header_64) = 0x20)
@@ -55,14 +55,14 @@ function readLoadCommands(headerAddress: NativePointer, ncmds: number): LoadComm
  * Lit les champs de la struct encryption_info_command_64 en mémoire.
  *
  * Layout de la struct (24 octets) :
- *   +0x00  cmd        — LC_ENCRYPTION_INFO ou LC_ENCRYPTION_INFO_64
- *   +0x04  cmdsize    — taille totale de la commande
- *   +0x08  cryptoff   — offset dans le fichier où commence la zone chiffrée
- *   +0x0C  cryptsize  — taille de la zone chiffrée
- *   +0x10  cryptid    — 0 = pas encore chiffré, >0 = identifiant FairPlay
- *   +0x14  pad        — alignement 8 octets (64-bit uniquement)
+ *   +0x00  cmd        -- LC_ENCRYPTION_INFO ou LC_ENCRYPTION_INFO_64
+ *   +0x04  cmdsize    -- taille totale de la commande
+ *   +0x08  cryptoff   -- offset dans le fichier où commence la zone chiffrée
+ *   +0x0C  cryptsize  -- taille de la zone chiffrée
+ *   +0x10  cryptid    -- 0 = pas encore chiffré, >0 = identifiant FairPlay
+ *   +0x14  pad        -- alignement 8 octets (64-bit uniquement)
  *
- * @see EXTERNAL_HEADERS/mach-o/loader.h — struct encryption_info_command_64
+ * @see EXTERNAL_HEADERS/mach-o/loader.h -- struct encryption_info_command_64
  */
 function readEncryptionInfoCommand(loadCommand: LoadCommand): EncryptionInfoCommand {
     if (loadCommand.cmdType === LC.LC_ENCRYPTION_INFO || loadCommand.cmdType === LC.LC_ENCRYPTION_INFO_64) {
@@ -106,7 +106,7 @@ function readEncryptionInfoCommand(loadCommand: LoadCommand): EncryptionInfoComm
  * Quand une app chiffrée est lancée, dyld détecte cryptid > 0 et demande au
  * kernel de déchiffrer la zone [cryptoff, cryptoff+cryptsize] avant de mapper
  * le segment __TEXT. À ce stade (Frida attaché au process vivant), les octets
- * en mémoire à base+cryptoff sont déjà en clair — on les lit directement.
+ * en mémoire à base+cryptoff sont déjà en clair -- on les lit directement.
  *
  * Côté kernel (xnu) le mécanisme est :
  *   1. Le kernel lit LC_ENCRYPTION_INFO_64 depuis le Mach-O
@@ -115,15 +115,15 @@ function readEncryptionInfoCommand(loadCommand: LoadCommand): EncryptionInfoComm
  *      pour déchiffrer les pages à la demande via le daemon fairplayd (HOST_FAIRPLAYD_PORT)
  *   4. Résultat : quand le code s'exécute, les pages mémoire sont en clair
  *
- * @see xnu/osfmk/vm/vm_protos.h — vm_map_apple_protected()
- * @see xnu/osfmk/kern/page_decrypt.h — text_crypter_create_hook_t
+ * @see xnu/osfmk/vm/vm_protos.h -- vm_map_apple_protected()
+ * @see xnu/osfmk/kern/page_decrypt.h -- text_crypter_create_hook_t
  */
 function readDecryptedDataInMemory(baseAddress: NativePointer, cryptOffset: number, cryptsize: number): [DecryptedSectionMeta, ArrayBuffer] {
     // base + cryptoff = adresse mémoire du début de la zone qui était chiffrée sur disque
     // mais qui est maintenant en clair grâce au déchiffrement par le kernel au chargement
     const decryptedCodeAddress = baseAddress.add(cryptOffset);
 
-    // readByteArray peut retourner null si la taille est 0 — on fallback sur un buffer vide
+    // readByteArray peut retourner null si la taille est 0 -- on fallback sur un buffer vide
     const plainBytes = decryptedCodeAddress.readByteArray(cryptsize) || nullData;
 
     return [{ address: decryptedCodeAddress, size: plainBytes.byteLength }, plainBytes];
@@ -179,7 +179,7 @@ function extractLcEncryptionInfo(loadsCommands: LoadCommand[]): LcEncryptionInfo
 /**
  * Extrait les octets déchiffrés du module si celui-ci est protégé par FairPlay.
  * Vérifie isEncrypted (cryptid > 0) avant de tenter la lecture mémoire.
- * Retourne null si le module n'est pas chiffré — le host recevra alors un nullData.
+ * Retourne null si le module n'est pas chiffré -- le host recevra alors un nullData.
  */
 function extractDecryptedData(moduleMeta: ModuleMetaData): [DecryptedSectionMeta, ArrayBuffer] | null {
     if (!moduleMeta) {
@@ -204,7 +204,7 @@ function extractDecryptedData(moduleMeta: ModuleMetaData): [DecryptedSectionMeta
  *  4. Assembler le tout dans un ModuleMetaData
  *
  * Note : le dump effectif des octets déchiffrés est fait séparément
- * par extractDecryptedData() — parseModule ne touche pas à la mémoire chiffrée.
+ * par extractDecryptedData() -- parseModule ne touche pas à la mémoire chiffrée.
  */
 function parseModule(appDir: string, module: Module): ModuleMetaData | null {
     if (!module) {
@@ -231,7 +231,7 @@ function parseModule(appDir: string, module: Module): ModuleMetaData | null {
         nlcmds: nlcmds,
         LoadCommands: loadCommands,
         LcEncryptionInfo: lcEncInfo,
-        // cryptid > 0 → chiffré par FairPlay (1=app, 2=ML model — cf. xnu/bsd/sys/mman.h)
+        // cryptid > 0 → chiffré par FairPlay (1=app, 2=ML model -- cf. xnu/bsd/sys/mman.h)
         isEncrypted: (lcEncInfo?.cryptid ?? 0) > 0,
         // Sera rempli plus tard par extractDecryptedData() si le module est chiffré
         DecryptedSectionMeta: null,
@@ -241,7 +241,7 @@ function parseModule(appDir: string, module: Module): ModuleMetaData | null {
 }
 
 /**
- * Cache des objets Module Frida (légers — juste name/path/base/size, pas de données binaires).
+ * Cache des objets Module Frida (légers -- juste name/path/base/size, pas de données binaires).
  * Rempli par prepareTheExtraction(), consommé par dumpModule(index).
  * On sépare le listing (pas de copie mémoire) du dump (readByteArray coûteux)
  * pour éviter de doubler la consommation mémoire sur le device.
@@ -270,7 +270,7 @@ rpc.exports = {
     getModulePath(): string {
         const mainModule = Process.mainModule;
         if (!mainModule) {
-            throw new Error("Process.mainModule is null — the process may not be fully loaded yet");
+            throw new Error("Process.mainModule is null -- the process may not be fully loaded yet");
         }
         return mainModule.path;
     },
@@ -282,13 +282,13 @@ rpc.exports = {
      * au .app bundle (même répertoire parent que le mainModule), et les stocke
      * dans inMemoryModules[]. Le mainModule est toujours à l'index 0.
      *
-     * @returns le nombre de modules trouvés — le host itérera de 0 à n-1 via dumpModules(i)
+     * @returns le nombre de modules trouvés -- le host itérera de 0 à n-1 via dumpModules(i)
      */
     prepareTheExtraction(): number {
         inMemoryModules.length = 0;
         const mainModule = Process.mainModule;
         if (!mainModule) {
-            throw new Error("Process.mainModule is null — the process may not be fully loaded yet");
+            throw new Error("Process.mainModule is null -- the process may not be fully loaded yet");
         }
 
         // On filtre les modules chargés pour ne garder que ceux dont le path
@@ -310,10 +310,10 @@ rpc.exports = {
      *
      * Parse le header Mach-O du module, et si celui-ci est chiffré par FairPlay,
      * lit les octets déchiffrés depuis la mémoire du process (readByteArray).
-     * C'est ici que la copie mémoire a lieu — un seul module à la fois pour
+     * C'est ici que la copie mémoire a lieu -- un seul module à la fois pour
      * limiter le pic mémoire sur le device.
      *
-     * @param index — position dans inMemoryModules (0 = mainModule)
+     * @param index -- position dans inMemoryModules (0 = mainModule)
      * @returns [métadonnées, octets_déchiffrés] ou null si le module n'a pas pu être parsé
      */
     dumpModules(index: number): [ModuleMetaData, ArrayBuffer] | null {

@@ -2,8 +2,12 @@
 
 Utilise Capstone pour désassembler les octets déchiffrés en instructions
 ARM64 lisibles. Produit deux fichiers par module dumpé :
-  - dump.bin  — octets bruts déchiffrés
-  - dump.asm  — désassemblage texte (adresse + mnémonique + opérandes)
+  - dump.bin  -- octets bruts déchiffrés (utilisable dans un éditeur hex ou pour re-patch)
+  - dump.asm  -- désassemblage texte (adresse + mnémonique + opérandes)
+
+Ces fichiers servent d'archive de la zone déchiffrée avant patch.
+Le .asm utilise les adresses mémoire du device (pas des offsets fichier),
+pour pouvoir corréler avec une session Frida ou un débugueur.
 """
 from pathlib import Path
 
@@ -16,7 +20,7 @@ def reassemble(output_dir: Path, data: bytes, base_address: int = 0x0):
     """Désassemble un buffer ARM64 et écrit le résultat en fichier texte.
 
     Le base_address correspond à l'adresse mémoire d'origine du code sur le device
-    (decrypted_meta.address) — les adresses dans le .asm seront donc celles
+    (decrypted_meta.address) -- les adresses dans le .asm seront donc celles
     du binaire en mémoire, pas des offsets relatifs.
 
     Args:
@@ -56,5 +60,5 @@ def write_dump(
     reassemble(dump_dir, data, int(address, 16))
     success(
         f"Decrypted dump written for [yellow]{module_name}[/] "
-        f"— [cyan]{cryptsize:,}[/] bytes → [dim]{dump_dir}[/]"
+        f"-- [cyan]{cryptsize:,}[/] bytes → [dim]{dump_dir}[/]"
     )

@@ -1,7 +1,7 @@
 """Types Python miroirs des interfaces TypeScript (agent/shared.ts).
 
 Frida sérialise les objets JS en JSON lors du transfert RPC.
-Côté Python on reçoit donc des dicts — ces TypedDict documentent
+Côté Python on reçoit donc des dicts -- ces TypedDict documentent
 la structure exacte et permettent l'autocomplétion + la vérification
 statique (mypy / pyright).
 
@@ -58,8 +58,9 @@ class ModuleMetaDataDict(TypedDict):
     isMainModule: bool                                      # True si c'est Process.mainModule
     moduleName: str                                         # nom court du binaire (ex: "MyApp")
     modulePath: str                                         # chemin complet sur le device iOS
-    moduleParentPath: str                                   # répertoire parent (le .app bundle)
-    moduleAppDir:str                                        # nom du répertoire du module principal
+    moduleParentPath: str                                   # répertoire parent du module (dirname du path)
+    moduleAppDir: str                                       # chemin relatif du module dans le .app bundle
+                                                            # (ex: "MyApp", "Frameworks/Foo.framework/Foo")
     moduleSize: int                                         # taille du module mappé en mémoire
     moduleArch: str                                         # architecture CPU (ex: "arm64")
     modulePlatform: str                                     # plateforme (ex: "darwin")
@@ -83,7 +84,7 @@ class BinaryInfo:
     
     file_hash: str      # SHA-256 du fichier complet
     crypt_hash: str     # SHA-256 de la zone [cryptoff, cryptoff+cryptsize]
-    fat_offset:int      # offset du fichier. 0x00 dans 99% des cas
-    cryptoff: int       # offset de la zone chiffrée dans le fichier
-    cryptsize: int      # taille de la zone chiffrée
-    cryptid: int        # 0 après patch, >0 avant
+    fat_offset: int     # offset de la slice dans le FAT (0 pour thin binary, >0 pour FAT/Universal)
+    cryptoff: int       # offset de la zone chiffrée dans la slice (champ de LC_ENCRYPTION_INFO)
+    cryptsize: int      # taille de la zone chiffrée en octets
+    cryptid: int        # 0 = pas chiffré (ou déjà patché), 1 = FairPlay app, 2 = FairPlay ML model

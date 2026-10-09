@@ -1,11 +1,14 @@
-"""yafipadump — Yet Another Frida IPA Dump tool.
+"""yafipadump -- Yet Another Frida IPA Dump tool.
 
 Point d'entrée principal. Connecte un device iOS jailbreaké via USB,
 injecte l'agent Frida, et dump les binaires chiffrés FairPlay
 en les remplaçant par leur version déchiffrée depuis la mémoire.
 
+Le process cible est toujours tué en finally (même si le dump crashe)
+pour ne pas laisser un process zombie sur le device.
+
 Utilisation :
-    python -m yafipadump com.example.MyApp
+    python -m yafipadump --host iphone com.example.MyApp
 """
 import argparse
 
