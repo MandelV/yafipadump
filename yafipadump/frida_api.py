@@ -12,7 +12,7 @@ ces appels pour éviter les dict["magic_key"] partout dans le code.
 """
 import frida
 
-from shared_types import ModuleMetaDataDict
+from .shared_types import ModuleMetaDataDict
 
 
 class FridaAgentAPI:

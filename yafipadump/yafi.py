@@ -16,15 +16,15 @@ from pathlib import Path, PurePosixPath
 
 import frida
 
-from log import (
+from .log import (
     console, info, success, error,
     phase, module_banner, module_info, summary_panel,
 )
-from shared_types import ModuleMetaDataDict
-from frida_api import FridaAgentAPI
-from macho import get_binary_info, patch_cryptid, patch_crypt_section
-from disasm import write_dump
-from report import print_report
+from .shared_types import ModuleMetaDataDict
+from .frida_api import FridaAgentAPI
+from .macho import get_binary_info, patch_cryptid, patch_crypt_section
+from .disasm import write_dump
+from .report import print_report
 
 
 class Yafi:
@@ -33,11 +33,13 @@ class Yafi:
     Args:
         bundle_id: identifiant du bundle iOS (ex: "com.example.MyApp")
         agent_path: chemin vers le script JS compilé de l'agent Frida
+        ssh_host: hostname SSH du device iOS (tel que configuré dans ~/.ssh/config)
     """
 
-    def __init__(self, bundle_id: str, agent_path: str):
+    def __init__(self, bundle_id: str, agent_path: str, ssh_host: str = "6s"):
         self.bundle_id = bundle_id
         self.agent_path = agent_path
+        self.ssh_host = ssh_host
 
         # État Frida — initialisé par connect() et spawn_and_attach()
         self.device: frida.Device = None
@@ -208,9 +210,9 @@ class Yafi:
         # --- Phase 2 : Transfer du bundle ---
         phase("Transfer", "bold magenta")
         info(f"Copying .app bundle from device...")
-        info(f"[dim]scp -r 6s:{path.parent}/. → {self.dump_dir}[/]")
+        info(f"[dim]scp -r {self.ssh_host}:{path.parent}/. → {self.dump_dir}[/]")
         subprocess.run(
-            ["scp", "-q", "-r", f"6s:{path.parent}/.", str(self.dump_dir)],
+            ["scp", "-q", "-r", f"{self.ssh_host}:{path.parent}/.", str(self.dump_dir)],
             check=True,
         )
         success(f"Bundle copied to [cyan]{self.dump_dir}[/]")

@@ -1,0 +1,5 @@
+capstone>=5.0.9
+frida>=17.22.2
+lief>=1.0.0
+pwn>=1.0
+rich>=15.0.0

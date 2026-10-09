@@ -9,7 +9,7 @@ from pathlib import Path
 
 from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
 
-from log import success
+from .log import success
 
 
 def reassemble(output_dir: Path, data: bytes, base_address: int = 0x0):

@@ -10,6 +10,12 @@ dependencies = [
     "rich>=15.0.0",
 ]
 
+[project.scripts]
+yafipadump = "yafipadump.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["yafipadump*"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",

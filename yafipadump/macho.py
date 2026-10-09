@@ -10,8 +10,8 @@ import hashlib
 
 import lief
 
-from log import info, success
-from shared_types import BinaryInfo
+from .log import info, success
+from .shared_types import BinaryInfo
 
 lief.disable_leak_warning()
 

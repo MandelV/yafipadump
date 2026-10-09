@@ -3,8 +3,8 @@
 Affiche un rapport structuré avant/après chaque opération de patch
 pour permettre le suivi visuel et la vérification d'intégrité.
 """
-from log import console
-from shared_types import BinaryInfo
+from .log import console
+from .shared_types import BinaryInfo
 
 
 def print_report(
