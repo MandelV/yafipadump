@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: yafipadump
-Version: 0.1.0
-Requires-Python: >=3.12
-Requires-Dist: capstone>=5.0.9
-Requires-Dist: frida>=17.22.2
-Requires-Dist: lief>=1.0.0
-Requires-Dist: pwn>=1.0
-Requires-Dist: rich>=15.0.0

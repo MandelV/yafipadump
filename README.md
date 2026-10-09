@@ -6,8 +6,7 @@ Built because existing dumpers (flexdecrypt, bfdecrypt, CrackerXI, bagbak, etc.)
 
 Also a learning project - an excuse to dig into Mach-O internals, XNU's FairPlay decryption pipeline, and Frida's RPC bridge.
 
-
-
+![yafi](docs/yafi.gif)
 
 ## How it works
 

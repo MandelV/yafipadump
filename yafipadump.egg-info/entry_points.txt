@@ -1,2 +1,0 @@
-[console_scripts]
-yafipadump = yafipadump.__main__:main
