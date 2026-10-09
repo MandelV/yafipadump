@@ -159,7 +159,7 @@ def patch_binary(path: str, mem_dump: bytes | list, arch: str) -> tuple[str, Bin
         (hash_du_dump, infos_après_patch)
     """
     bi = get_binary_info(path, arch)
-    
+
     if len(mem_dump) != bi.cryptsize:
         raise ValueError(
             f"Invalid dump size: {len(mem_dump)} != {bi.cryptsize}"
@@ -200,9 +200,10 @@ def patch_binary(path: str, mem_dump: bytes | list, arch: str) -> tuple[str, Bin
 
         os.replace(tmp_path, path)
     except:
+        raise
+    finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
-        raise
 
     success(f"Patch applied @ [cyan]{bi.cryptoff:#010x}[/] — [yellow]{nbw}[/] bytes written")
     success("cryptid zeroed out")
