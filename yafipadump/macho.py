@@ -134,37 +134,29 @@ def patch_cryptid(path: str, arch: str) -> BinaryInfo:
         f.write((0).to_bytes(4, "little"))
 
     after = get_binary_info(path, arch)
-    assert after.cryptid == 0, f"cryptid should be 0 after patch, got {after.cryptid}"
+    if after.cryptid != 0:
+        raise RuntimeError(f"cryptid should be 0 after patch, got {after.cryptid}")
     success("cryptid zeroed out")
     return after
 
 
-def patch_crypt_section(path: str, mem_dump: bytes | list, expected_cryptoff: int, arch: str) -> tuple[str, BinaryInfo]:
+def patch_crypt_section(path: str, mem_dump: bytes | list, arch: str) -> tuple[str, BinaryInfo]:
     """Écrase la zone chiffrée du fichier par les octets déchiffrés du dump mémoire.
 
-    Vérifie avant écriture que le cryptoff du fichier correspond à celui
-    rapporté par l'agent (cohérence fichier/mémoire) et que la taille du
-    dump correspond à cryptsize (pas de troncature ni de surplus).
-    L'intégrité est vérifiée post-écriture via SHA-256.
+    Les checks de cohérence (cryptoff, taille) doivent être faits par l'appelant
+    avant d'arriver ici. Cette fonction écrit puis vérifie l'intégrité post-écriture
+    via SHA-256.
 
     Args:
         path: chemin du binaire sur disque
         mem_dump: octets déchiffrés lus depuis la mémoire du process (via Frida)
-        expected_cryptoff: cryptoff tel que lu en mémoire par l'agent
+        arch: architecture Frida du process (ex: "arm64")
 
     Returns:
         (hash_du_dump, infos_après_patch)
     """
     bi = get_binary_info(path, arch)
     dump_bytes = bytes(mem_dump) if not isinstance(mem_dump, (bytes, bytearray)) else mem_dump
-
-    assert bi.cryptoff == expected_cryptoff, (
-        f"cryptoff mismatch: file={bi.cryptoff:#x} vs memory={expected_cryptoff:#x}"
-    )
-    assert len(dump_bytes) == bi.cryptsize, (
-        f"size mismatch: dump={len(dump_bytes)} bytes vs cryptsize={bi.cryptsize} bytes"
-    )
-
     mem_hash = sha256_hex(dump_bytes)
 
     with open(path, "r+b") as f:
@@ -172,13 +164,13 @@ def patch_crypt_section(path: str, mem_dump: bytes | list, expected_cryptoff: in
         nbw = f.write(dump_bytes)
         success(f"Patch applied @ [cyan]{bi.cryptoff:#010x}[/] — [yellow]{nbw}[/] bytes written")
 
-    # Vérification d'intégrité : relit la zone patchée et compare avec le dump
     after = get_binary_info(path, arch)
-    assert after.crypt_hash == mem_hash, (
-        f"Integrity check failed!\n"
-        f"  file crypt section: {after.crypt_hash}\n"
-        f"  memory dump:        {mem_hash}"
-    )
+    if after.crypt_hash != mem_hash:
+        raise RuntimeError(
+            f"Integrity check failed!\n"
+            f"  file crypt section: {after.crypt_hash}\n"
+            f"  memory dump:        {mem_hash}"
+        )
     success("Integrity verified: file crypt section == memory dump")
 
     return mem_hash, after
