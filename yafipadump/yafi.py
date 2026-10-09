@@ -36,7 +36,7 @@ class Yafi:
         ssh_host: hostname SSH du device iOS (tel que configuré dans ~/.ssh/config)
     """
 
-    def __init__(self, bundle_id: str, agent_path: str, ssh_host: str = "6s"):
+    def __init__(self, bundle_id: str, agent_path: str, ssh_host: str):
         self.bundle_id = bundle_id
         self.agent_path = agent_path
         self.ssh_host = ssh_host

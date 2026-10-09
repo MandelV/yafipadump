@@ -28,8 +28,8 @@ def main():
     )
     parser.add_argument(
         "--host",
-        default="6s",
-        help="SSH hostname of the iOS device, as configured in ~/.ssh/config (default: 6s)",
+        required=True,
+        help="SSH hostname of the iOS device, as configured in ~/.ssh/config",
     )
     args = parser.parse_args()
 
