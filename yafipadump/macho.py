@@ -8,6 +8,7 @@ sur la mémoire du process — le dump mémoire est géré côté agent Frida.
 """
 import hashlib
 import os
+import shutil
 import tempfile
 
 import lief
@@ -135,7 +136,10 @@ def _patch_crypt_section(f, fat_offset: int, cryptoff: int, dump_bytes: bytes) -
 def _patch_cryptid(f, cryptid_offset: int):
     """Met cryptid à 0 dans un file handle ouvert."""
     f.seek(cryptid_offset)
-    f.write((0).to_bytes(4, "little"))
+    nbw = f.write((0).to_bytes(4, "little"))
+    if nbw != 4:
+        raise RuntimeError( f"Partial cryptid write: {nbw}/4 bytes")
+    return True
 
 
 def patch_binary(path: str, mem_dump: bytes | list, arch: str) -> tuple[str, BinaryInfo]:
@@ -155,6 +159,11 @@ def patch_binary(path: str, mem_dump: bytes | list, arch: str) -> tuple[str, Bin
         (hash_du_dump, infos_après_patch)
     """
     bi = get_binary_info(path, arch)
+    
+    if len(mem_dump) != bi.cryptsize:
+        raise ValueError(
+            f"Invalid dump size: {len(mem_dump)} != {bi.cryptsize}"
+        )
     dump_bytes = bytes(mem_dump) if not isinstance(mem_dump, (bytes, bytearray)) else mem_dump
     mem_hash = sha256_hex(dump_bytes)
 
@@ -163,13 +172,14 @@ def patch_binary(path: str, mem_dump: bytes | list, arch: str) -> tuple[str, Bin
     if enc is None:
         raise ValueError("Pas de LC_ENCRYPTION_INFO[_64]")
 
+    
+
     cryptid_offset = binary.fat_offset + enc.command_offset + ENCRYPTION_INFO_CRYPTID
 
     fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
     try:
         os.close(fd)
-        with open(path, "rb") as src, open(tmp_path, "wb") as dst:
-            dst.write(src.read())
+        shutil.copy2(path, tmp_path)
 
         with open(tmp_path, "r+b") as f:
             nbw = _patch_crypt_section(f, bi.fat_offset, bi.cryptoff, dump_bytes)
