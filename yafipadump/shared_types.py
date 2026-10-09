@@ -59,6 +59,7 @@ class ModuleMetaDataDict(TypedDict):
     moduleName: str                                         # nom court du binaire (ex: "MyApp")
     modulePath: str                                         # chemin complet sur le device iOS
     moduleParentPath: str                                   # répertoire parent (le .app bundle)
+    moduleAppDir:str                                        # nom du répertoire du module principal
     moduleSize: int                                         # taille du module mappé en mémoire
     moduleArch: str                                         # architecture CPU (ex: "arm64")
     modulePlatform: str                                     # plateforme (ex: "darwin")
@@ -79,8 +80,10 @@ class BinaryInfo:
     Utilisé pour vérifier l'intégrité avant/après patching :
     on compare les hash de la zone chiffrée entre le fichier et le dump mémoire.
     """
+    
     file_hash: str      # SHA-256 du fichier complet
     crypt_hash: str     # SHA-256 de la zone [cryptoff, cryptoff+cryptsize]
+    fat_offset:int      # offset du fichier. 0x00 dans 99% des cas
     cryptoff: int       # offset de la zone chiffrée dans le fichier
     cryptsize: int      # taille de la zone chiffrée
     cryptid: int        # 0 après patch, >0 avant

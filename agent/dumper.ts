@@ -206,7 +206,7 @@ function extractDecryptedData(moduleMeta: ModuleMetaData): [DecryptedSectionMeta
  * Note : le dump effectif des octets déchiffrés est fait séparément
  * par extractDecryptedData() — parseModule ne touche pas à la mémoire chiffrée.
  */
-function parseModule(module: Module): ModuleMetaData | null {
+function parseModule(appDir: string, module: Module): ModuleMetaData | null {
     if (!module) {
         throw new Error(`Module introuvable dans le process`);
     }
@@ -224,6 +224,7 @@ function parseModule(module: Module): ModuleMetaData | null {
         moduleName: module.name,
         modulePath: module.path,
         moduleParentPath: dirname(module.path),
+        moduleAppDir: module.path.startsWith(appDir) ? module.path.slice(appDir.length) : module.name,
         moduleSize: module.size,
         moduleArch: Process.arch,
         modulePlatform: Process.platform,
@@ -290,14 +291,13 @@ rpc.exports = {
             throw new Error("Process.mainModule is null — the process may not be fully loaded yet");
         }
 
-        // On filtre les modules chargés pour ne garder que ceux qui vivent
-        // dans le même répertoire que le mainModule (= le .app bundle).
-        // Ça capture les frameworks embarqués (ex: Frameworks/LibFoo.dylib)
+        // On filtre les modules chargés pour ne garder que ceux dont le path
+        // est sous le répertoire du mainModule (= le .app bundle).
+        // startsWith couvre les sous-dossiers (ex: Frameworks/Foo.framework/Foo)
         // tout en excluant les dylibs système (/usr/lib/, /System/, etc.)
+        const appDir = dirname(mainModule.path) + "/";
         const modules = Process.enumerateModules().filter((module) => {
-            // On exclut mainModule du filtre car on l'ajoute manuellement en premier
-            // pour garantir qu'il est toujours à l'index 0
-            return dirname(module.path) === dirname(mainModule.path) && module.name !== mainModule.name;
+            return module.path.startsWith(appDir) && module.name !== mainModule.name;
         });
 
         // mainModule en premier (index 0) → le host sait que c'est toujours le binaire principal
@@ -325,9 +325,12 @@ rpc.exports = {
         }
 
         try {
+            const mainModule = Process.mainModule;
+
+            const appDir = dirname(mainModule.path) + "/";
             const module = inMemoryModules[index];
 
-            const parsedModuleMetadata = parseModule(module);
+            const parsedModuleMetadata = parseModule(appDir, module);
 
             if (parsedModuleMetadata) {
                 const decryptedData = extractDecryptedData(parsedModuleMetadata);

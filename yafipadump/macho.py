@@ -56,12 +56,12 @@ def parse_macho(path: str):
 def read_crypt_section(path: str, binary) -> bytes:
     """Lit les octets de la zone chiffrée directement depuis le fichier sur disque.
 
-    Utilise fat_offset pour gérer le cas FAT binary (la zone chiffrée est
-    relative au début de la slice, pas du fichier).
+    Le seek additionne fat_offset (offset de la slice dans un FAT/Universal binary,
+    0 pour un thin binary) et crypt_offset pour atteindre la zone chiffrée quelle
+    que soit la structure du conteneur.
     """
     enc = binary.encryption_info
     with open(path, "rb") as f:
-        # fat_offset == 0 pour un non-FAT binary, sinon l'offset de la slice dans le FAT
         f.seek(binary.fat_offset + enc.crypt_offset)
         return f.read(enc.crypt_size)
 
@@ -77,6 +77,7 @@ def get_binary_info(path: str) -> BinaryInfo:
     crypt_data = read_crypt_section(path, binary)
     return BinaryInfo(
         file_hash=sha256_of_file(path),
+        fat_offset= binary.fat_offset,
         crypt_hash=sha256_hex(crypt_data),
         cryptoff=enc.crypt_offset,
         cryptsize=enc.crypt_size,
@@ -116,17 +117,16 @@ def patch_cryptid(path: str) -> BinaryInfo:
     return after
 
 
-def patch_crypt_section(path: str, mem_dump: bytes | list, expected_cryptoff: int) -> tuple[str, BinaryInfo]:
+def patch_crypt_section(path: str, mem_dump: bytes | list) -> tuple[str, BinaryInfo]:
     """Écrase la zone chiffrée du fichier par les octets déchiffrés du dump mémoire.
 
-    Vérifie que le cryptoff du fichier correspond à celui de la mémoire
-    (sinon on écrirait au mauvais endroit), puis vérifie l'intégrité
-    post-écriture en comparant les hash SHA-256.
+    L'offset d'écriture est calculé depuis les headers Mach-O du fichier lui-même
+    (fat_offset + cryptoff), sans dépendre d'une valeur externe.
+    L'intégrité est vérifiée post-écriture en comparant les hash SHA-256.
 
     Args:
         path: chemin du binaire sur disque
         mem_dump: octets déchiffrés lus depuis la mémoire du process (via Frida)
-        expected_cryptoff: cryptoff tel que retourné par l'agent JS
 
     Returns:
         (hash_du_dump, infos_après_patch)
@@ -135,14 +135,8 @@ def patch_crypt_section(path: str, mem_dump: bytes | list, expected_cryptoff: in
     dump_bytes = bytes(mem_dump) if not isinstance(mem_dump, (bytes, bytearray)) else mem_dump
     mem_hash = sha256_hex(dump_bytes)
 
-    # Sanity check : le cryptoff du fichier doit correspondre à celui vu en mémoire
-    if bi.cryptoff != expected_cryptoff:
-        raise ValueError(
-            f"cryptoff mismatch: memory={expected_cryptoff:#010x} file={bi.cryptoff:#010x}"
-        )
-
     with open(path, "r+b") as f:
-        f.seek(bi.cryptoff)
+        f.seek(bi.fat_offset + bi.cryptoff)
         nbw = f.write(dump_bytes)
         success(f"Patch applied @ [cyan]{bi.cryptoff:#010x}[/] — [yellow]{nbw}[/] bytes written")
 

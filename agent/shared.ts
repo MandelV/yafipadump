@@ -15,6 +15,8 @@ export interface ModuleMetaData {
     moduleName: string;
     /** Chemin complet sur le filesystem de l'appareil. */
     modulePath: string;
+    /** Nom du répertoire du module principal */
+    moduleAppDir: string;
     /** nom du répertoire parent sur le filesystem de l'appareil. */
     moduleParentPath: string;
     /** Taille totale du module mappé en mémoire (en octets). */
@@ -36,7 +38,7 @@ export interface ModuleMetaData {
 }
 
 /**
- * Métadonnées de la zone déchiffrée extraite de la mémoire du proatcess.
+ * Métadonnées de la zone déchiffrée extraite de la mémoire du process.
  * Les octets eux-mêmes sont transportés séparément dans un ArrayBuffer.
  */
 export interface DecryptedSectionMeta {
@@ -63,7 +65,6 @@ export interface LcEncryptionInfo {
     pad: number;
 }
 
-
 /**
  * Couple métadonnées + octets déchiffrés d'un module, stocké en mémoire
  * par dumpModules() pour être récupéré un par un via getModule(index).
@@ -73,4 +74,3 @@ export interface DumpedModule {
     moduleMetaData: ModuleMetaData;
     data: ArrayBuffer;
 }
-

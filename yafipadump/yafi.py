@@ -142,7 +142,6 @@ class Yafi:
             return None
 
         meta, data = result
-        module_info(meta)
 
         enc_info = meta.get("LcEncryptionInfo")
         decrypted_meta = meta.get("DecryptedSectionMeta")
@@ -167,8 +166,8 @@ class Yafi:
         if not meta.get("isEncrypted") or enc_info is None:
             info(f"Not encrypted — skipping patch")
             return
-
-        binary_path = str(self.dump_dir / meta["moduleName"])
+        
+        binary_path = str(self.dump_dir / meta["moduleAppDir"])
         mem_cryptoff = enc_info["cryptoff"]
 
         bi = get_binary_info(binary_path)
@@ -179,7 +178,7 @@ class Yafi:
         print_report("After Patch CryptID", "green", bi, mem_cryptoff)
 
         # Étape 2 : écrase la zone chiffrée par les octets en clair du dump mémoire
-        mem_hash, bi = patch_crypt_section(binary_path, data, mem_cryptoff)
+        mem_hash, bi = patch_crypt_section(binary_path, data)
         print_report("After Patch Crypt Section", "orange1", bi, mem_cryptoff, mem_hash)
 
         # Validation rapide via `file` — doit afficher "Mach-O 64-bit executable arm64"
@@ -225,6 +224,7 @@ class Yafi:
             if result is not None:
                 meta, data = result
                 module_banner(i, n_modules, meta["moduleName"], meta["isMainModule"])
+                module_info(meta)
                 self._patch_fs_module(meta, data)
 
         # --- Résumé final ---
