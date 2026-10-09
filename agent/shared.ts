@@ -36,7 +36,7 @@ export interface ModuleMetaData {
 }
 
 /**
- * Métadonnées de la zone déchiffrée extraite de la mémoire du process.
+ * Métadonnées de la zone déchiffrée extraite de la mémoire du proatcess.
  * Les octets eux-mêmes sont transportés séparément dans un ArrayBuffer.
  */
 export interface DecryptedSectionMeta {
