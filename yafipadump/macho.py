@@ -7,6 +7,8 @@ Ce module opère sur les fichiers copiés du device (post-scp), pas
 sur la mémoire du process — le dump mémoire est géré côté agent Frida.
 """
 import hashlib
+import os
+import shutil
 
 import lief
 
@@ -33,6 +35,17 @@ def sha256_of_file(path: str) -> str:
 def sha256_hex(data: bytes) -> str:
     """SHA-256 d'un buffer en mémoire, retourné en hex."""
     return hashlib.sha256(data).hexdigest()
+
+
+# --- Offsets encryption_info_command_64 (loader.h:1230) ---
+# Miroir de EncryptionInfoCommandOffset dans agent/macho.ts
+
+ENCRYPTION_INFO_CMD = 0x00
+ENCRYPTION_INFO_CMDSIZE = 0x04
+ENCRYPTION_INFO_CRYPTOFF = 0x08
+ENCRYPTION_INFO_CRYPTSIZE = 0x0C
+ENCRYPTION_INFO_CRYPTID = 0x10
+ENCRYPTION_INFO_PAD = 0x14
 
 
 # --- Parse ---
@@ -125,17 +138,28 @@ def patch_cryptid(path: str, arch: str) -> BinaryInfo:
     if enc is None:
         raise ValueError("Pas de LC_ENCRYPTION_INFO[_64]")
 
-    # command_offset = position de la LC dans le fichier (relatif à la slice)
-    # +0x10 = offset du champ cryptid dans la struct
-    offset = binary.fat_offset + enc.command_offset + 0x10
-    with open(path, "r+b") as f:
-        f.seek(offset)
-        # Écrit 0 en little-endian sur 4 octets (uint32_t cryptid = 0)
-        f.write((0).to_bytes(4, "little"))
+    offset = binary.fat_offset + enc.command_offset + ENCRYPTION_INFO_CRYPTID
 
-    after = get_binary_info(path, arch)
-    if after.cryptid != 0:
-        raise RuntimeError(f"cryptid should be 0 after patch, got {after.cryptid}")
+    tmp_path = path + ".tmp"
+    shutil.copy2(path, tmp_path)
+
+    try:
+        with open(tmp_path, "r+b") as f:
+            f.seek(offset)
+            f.write((0).to_bytes(4, "little"))
+            f.flush()
+            os.fsync(f.fileno())
+
+        after = get_binary_info(tmp_path, arch)
+        if after.cryptid != 0:
+            raise RuntimeError(f"cryptid should be 0 after patch, got {after.cryptid}")
+
+        os.replace(tmp_path, path)
+    except:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
     success("cryptid zeroed out")
     return after
 
@@ -144,8 +168,9 @@ def patch_crypt_section(path: str, mem_dump: bytes | list, arch: str) -> tuple[s
     """Écrase la zone chiffrée du fichier par les octets déchiffrés du dump mémoire.
 
     Les checks de cohérence (cryptoff, taille) doivent être faits par l'appelant
-    avant d'arriver ici. Cette fonction écrit puis vérifie l'intégrité post-écriture
-    via SHA-256.
+    avant d'arriver ici. Le patch est appliqué sur une copie temporaire, vérifié
+    via SHA-256, puis l'original est remplacé atomiquement (os.replace) pour
+    éviter de corrompre le fichier en cas d'écriture partielle.
 
     Args:
         path: chemin du binaire sur disque
@@ -159,18 +184,36 @@ def patch_crypt_section(path: str, mem_dump: bytes | list, arch: str) -> tuple[s
     dump_bytes = bytes(mem_dump) if not isinstance(mem_dump, (bytes, bytearray)) else mem_dump
     mem_hash = sha256_hex(dump_bytes)
 
-    with open(path, "r+b") as f:
-        f.seek(bi.fat_offset + bi.cryptoff)
-        nbw = f.write(dump_bytes)
-        success(f"Patch applied @ [cyan]{bi.cryptoff:#010x}[/] — [yellow]{nbw}[/] bytes written")
+    tmp_path = path + ".tmp"
+    shutil.copy2(path, tmp_path)
 
-    after = get_binary_info(path, arch)
-    if after.crypt_hash != mem_hash:
-        raise RuntimeError(
-            f"Integrity check failed!\n"
-            f"  file crypt section: {after.crypt_hash}\n"
-            f"  memory dump:        {mem_hash}"
-        )
+    try:
+        with open(tmp_path, "r+b") as f:
+            f.seek(bi.fat_offset + bi.cryptoff)
+            nbw = f.write(dump_bytes)
+            f.flush()
+            os.fsync(f.fileno())
+
+        if nbw != len(dump_bytes):
+            raise RuntimeError(
+                f"Partial write: {nbw}/{len(dump_bytes)} bytes written"
+            )
+
+        after = get_binary_info(tmp_path, arch)
+        if after.crypt_hash != mem_hash:
+            raise RuntimeError(
+                f"Integrity check failed!\n"
+                f"  file crypt section: {after.crypt_hash}\n"
+                f"  memory dump:        {mem_hash}"
+            )
+
+        os.replace(tmp_path, path)
+    except:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    success(f"Patch applied @ [cyan]{bi.cryptoff:#010x}[/] — [yellow]{nbw}[/] bytes written")
     success("Integrity verified: file crypt section == memory dump")
 
     return mem_hash, after

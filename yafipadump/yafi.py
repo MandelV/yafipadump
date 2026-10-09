@@ -183,13 +183,13 @@ class Yafi:
                 f"cryptsize mismatch: file={bi.cryptsize} bytes vs dump={len(data)} bytes"
             )
 
-        # Étape 1 : met cryptid à 0 pour que le kernel ne tente pas de déchiffrer
-        bi = patch_cryptid(binary_path, arch)
-        print_report("After Patch CryptID", "green", bi, mem_cryptoff)
-
-        # Étape 2 : écrase la zone chiffrée par les octets en clair du dump mémoire
+        # Étape 1 : écrase la zone chiffrée par les octets en clair du dump mémoire
         mem_hash, bi = patch_crypt_section(binary_path, data, arch)
-        print_report("After Patch Crypt Section", "orange1", bi, mem_cryptoff, mem_hash)
+        print_report("After Patch Crypt Section", "green", bi, mem_cryptoff, mem_hash)
+
+        # Étape 2 : met cryptid à 0 — seulement si l'intégrité du patch est vérifiée
+        bi = patch_cryptid(binary_path, arch)
+        print_report("After Patch CryptID", "orange1", bi, mem_cryptoff)
 
         # Validation rapide via `file` — doit afficher "Mach-O 64-bit executable arm64"
         result = subprocess.run(["file", binary_path], capture_output=True, text=True)
