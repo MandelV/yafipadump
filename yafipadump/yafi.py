@@ -169,16 +169,27 @@ class Yafi:
         
         binary_path = str(self.dump_dir / meta["moduleAppDir"])
         mem_cryptoff = enc_info["cryptoff"]
+        arch = meta["moduleArch"]
 
-        bi = get_binary_info(binary_path)
+        bi = get_binary_info(binary_path, arch)
         print_report("Before Patch", "blue", bi, mem_cryptoff)
 
         # Étape 1 : met cryptid à 0 pour que le kernel ne tente pas de déchiffrer
-        bi = patch_cryptid(binary_path)
+        bi = patch_cryptid(binary_path, arch)
+    
+        assert bi.cryptid == 0, (
+            f"cryptid was not patched"
+        )
+
+        assert bi.cryptsize == len(data), (
+            f"The file's cryptsize and size of the dump does not match"
+        )
+        
+
         print_report("After Patch CryptID", "green", bi, mem_cryptoff)
 
         # Étape 2 : écrase la zone chiffrée par les octets en clair du dump mémoire
-        mem_hash, bi = patch_crypt_section(binary_path, data)
+        mem_hash, bi = patch_crypt_section(binary_path, data, mem_cryptoff, arch)
         print_report("After Patch Crypt Section", "orange1", bi, mem_cryptoff, mem_hash)
 
         # Validation rapide via `file` — doit afficher "Mach-O 64-bit executable arm64"

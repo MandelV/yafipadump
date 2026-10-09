@@ -38,19 +38,41 @@ def sha256_hex(data: bytes) -> str:
 # --- Parse ---
 
 
-def parse_macho(path: str):
-    """Parse un binaire Mach-O (potentiellement FAT/Universal) et retourne la première slice.
+FRIDA_ARCH_TO_CPU_TYPE = {
+    "arm64": lief.MachO.Header.CPU_TYPE.ARM64,
+    "arm": lief.MachO.Header.CPU_TYPE.ARM,
+    "x64": lief.MachO.Header.CPU_TYPE.X86_64,
+    "ia32": lief.MachO.Header.CPU_TYPE.X86,
+}
 
-    Un FAT binary contient plusieurs slices (une par architecture).
-    On prend la première (index 0), qui est généralement arm64 sur iOS.
+
+def parse_macho(path: str, arch: str):
+    """Parse un binaire Mach-O et retourne la slice correspondant à l'architecture.
+
+    Pour un FAT/Universal binary, sélectionne la slice via fat.get(CPU_TYPE)
+    plutôt que de prendre aveuglément l'index 0.
+    Pour un thin binary, fat.get() retourne l'unique slice.
+
+    Args:
+        path: chemin du fichier Mach-O
+        arch: architecture Frida du process (ex: "arm64", "x64")
 
     Returns:
-        (fat_binary, first_slice) — le FatBinary et le Binary lief de la slice 0
+        (fat_binary, matching_slice)
     """
+    cpu_type = FRIDA_ARCH_TO_CPU_TYPE.get(arch)
+    if cpu_type is None:
+        raise ValueError(f"Architecture inconnue : {arch!r}")
+
     fat = lief.MachO.parse(path)
     if fat is None or len(fat) == 0:
         raise ValueError("Impossible de lire le Mach-O")
-    return fat, fat.at(0)
+
+    binary = fat.get(cpu_type)
+    if binary is None:
+        raise ValueError(f"Pas de slice {arch} ({cpu_type.name}) dans {path}")
+
+    return fat, binary
 
 
 def read_crypt_section(path: str, binary) -> bytes:
@@ -66,13 +88,13 @@ def read_crypt_section(path: str, binary) -> bytes:
         return f.read(enc.crypt_size)
 
 
-def get_binary_info(path: str) -> BinaryInfo:
+def get_binary_info(path: str, arch: str) -> BinaryInfo:
     """Extrait les métadonnées de chiffrement d'un binaire Mach-O sur disque.
 
     Calcule les hash du fichier complet et de la zone chiffrée
     pour permettre la vérification d'intégrité post-patch.
     """
-    _, binary = parse_macho(path)
+    _, binary = parse_macho(path, arch)
     enc = binary.encryption_info
     crypt_data = read_crypt_section(path, binary)
     return BinaryInfo(
@@ -88,7 +110,7 @@ def get_binary_info(path: str) -> BinaryInfo:
 # --- Patch ---
 
 
-def patch_cryptid(path: str) -> BinaryInfo:
+def patch_cryptid(path: str, arch: str) -> BinaryInfo:
     """Met à zéro le champ cryptid dans le fichier Mach-O.
 
     Après le dump, le binaire contient du code en clair mais cryptid indique
@@ -98,7 +120,7 @@ def patch_cryptid(path: str) -> BinaryInfo:
     Le champ cryptid est à l'offset +0x10 dans la struct encryption_info_command_64
     (après cmd, cmdsize, cryptoff, cryptsize — chacun 4 octets).
     """
-    _, binary = parse_macho(path)
+    _, binary = parse_macho(path, arch)
     enc = binary.encryption_info
     if enc is None:
         raise ValueError("Pas de LC_ENCRYPTION_INFO[_64]")
@@ -111,28 +133,38 @@ def patch_cryptid(path: str) -> BinaryInfo:
         # Écrit 0 en little-endian sur 4 octets (uint32_t cryptid = 0)
         f.write((0).to_bytes(4, "little"))
 
-    after = get_binary_info(path)
+    after = get_binary_info(path, arch)
     assert after.cryptid == 0, f"cryptid should be 0 after patch, got {after.cryptid}"
     success("cryptid zeroed out")
     return after
 
 
-def patch_crypt_section(path: str, mem_dump: bytes | list) -> tuple[str, BinaryInfo]:
+def patch_crypt_section(path: str, mem_dump: bytes | list, expected_cryptoff: int, arch: str) -> tuple[str, BinaryInfo]:
     """Écrase la zone chiffrée du fichier par les octets déchiffrés du dump mémoire.
 
-    L'offset d'écriture est calculé depuis les headers Mach-O du fichier lui-même
-    (fat_offset + cryptoff), sans dépendre d'une valeur externe.
-    L'intégrité est vérifiée post-écriture en comparant les hash SHA-256.
+    Vérifie avant écriture que le cryptoff du fichier correspond à celui
+    rapporté par l'agent (cohérence fichier/mémoire) et que la taille du
+    dump correspond à cryptsize (pas de troncature ni de surplus).
+    L'intégrité est vérifiée post-écriture via SHA-256.
 
     Args:
         path: chemin du binaire sur disque
         mem_dump: octets déchiffrés lus depuis la mémoire du process (via Frida)
+        expected_cryptoff: cryptoff tel que lu en mémoire par l'agent
 
     Returns:
         (hash_du_dump, infos_après_patch)
     """
-    bi = get_binary_info(path)
+    bi = get_binary_info(path, arch)
     dump_bytes = bytes(mem_dump) if not isinstance(mem_dump, (bytes, bytearray)) else mem_dump
+
+    assert bi.cryptoff == expected_cryptoff, (
+        f"cryptoff mismatch: file={bi.cryptoff:#x} vs memory={expected_cryptoff:#x}"
+    )
+    assert len(dump_bytes) == bi.cryptsize, (
+        f"size mismatch: dump={len(dump_bytes)} bytes vs cryptsize={bi.cryptsize} bytes"
+    )
+
     mem_hash = sha256_hex(dump_bytes)
 
     with open(path, "r+b") as f:
@@ -141,7 +173,7 @@ def patch_crypt_section(path: str, mem_dump: bytes | list) -> tuple[str, BinaryI
         success(f"Patch applied @ [cyan]{bi.cryptoff:#010x}[/] — [yellow]{nbw}[/] bytes written")
 
     # Vérification d'intégrité : relit la zone patchée et compare avec le dump
-    after = get_binary_info(path)
+    after = get_binary_info(path, arch)
     assert after.crypt_hash == mem_hash, (
         f"Integrity check failed!\n"
         f"  file crypt section: {after.crypt_hash}\n"
