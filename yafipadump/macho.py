@@ -8,7 +8,7 @@ sur la mémoire du process — le dump mémoire est géré côté agent Frida.
 """
 import hashlib
 import os
-import shutil
+import tempfile
 
 import lief
 
@@ -123,54 +123,28 @@ def get_binary_info(path: str, arch: str) -> BinaryInfo:
 # --- Patch ---
 
 
-def patch_cryptid(path: str, arch: str) -> BinaryInfo:
-    """Met à zéro le champ cryptid dans le fichier Mach-O.
-
-    Après le dump, le binaire contient du code en clair mais cryptid indique
-    encore qu'il est chiffré. Si on ne le met pas à 0, le kernel essaiera
-    de déchiffrer un binaire déjà en clair → crash au lancement.
-
-    Le champ cryptid est à l'offset +0x10 dans la struct encryption_info_command_64
-    (après cmd, cmdsize, cryptoff, cryptsize — chacun 4 octets).
-    """
-    _, binary = parse_macho(path, arch)
-    enc = binary.encryption_info
-    if enc is None:
-        raise ValueError("Pas de LC_ENCRYPTION_INFO[_64]")
-
-    offset = binary.fat_offset + enc.command_offset + ENCRYPTION_INFO_CRYPTID
-
-    tmp_path = path + ".tmp"
-    shutil.copy2(path, tmp_path)
-
-    try:
-        with open(tmp_path, "r+b") as f:
-            f.seek(offset)
-            f.write((0).to_bytes(4, "little"))
-            f.flush()
-            os.fsync(f.fileno())
-
-        after = get_binary_info(tmp_path, arch)
-        if after.cryptid != 0:
-            raise RuntimeError(f"cryptid should be 0 after patch, got {after.cryptid}")
-
-        os.replace(tmp_path, path)
-    except:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
-
-    success("cryptid zeroed out")
-    return after
+def _patch_crypt_section(f, fat_offset: int, cryptoff: int, dump_bytes: bytes) -> int:
+    """Écrase la zone chiffrée par les octets déchiffrés dans un file handle ouvert."""
+    f.seek(fat_offset + cryptoff)
+    nbw = f.write(dump_bytes)
+    if nbw != len(dump_bytes):
+        raise RuntimeError(f"Partial write: {nbw}/{len(dump_bytes)} bytes")
+    return nbw
 
 
-def patch_crypt_section(path: str, mem_dump: bytes | list, arch: str) -> tuple[str, BinaryInfo]:
-    """Écrase la zone chiffrée du fichier par les octets déchiffrés du dump mémoire.
+def _patch_cryptid(f, cryptid_offset: int):
+    """Met cryptid à 0 dans un file handle ouvert."""
+    f.seek(cryptid_offset)
+    f.write((0).to_bytes(4, "little"))
 
-    Les checks de cohérence (cryptoff, taille) doivent être faits par l'appelant
-    avant d'arriver ici. Le patch est appliqué sur une copie temporaire, vérifié
-    via SHA-256, puis l'original est remplacé atomiquement (os.replace) pour
-    éviter de corrompre le fichier en cas d'écriture partielle.
+
+def patch_binary(path: str, mem_dump: bytes | list, arch: str) -> tuple[str, BinaryInfo]:
+    """Applique les deux patchs (crypt section + cryptid) en une seule transaction atomique.
+
+    Les écritures sont faites sur une copie temporaire (mkstemp, même filesystem
+    que l'original). L'original n'est remplacé (os.replace) que si les deux patchs
+    et toutes les vérifications passent. En cas d'erreur, la copie est supprimée
+    et l'original reste intact.
 
     Args:
         path: chemin du binaire sur disque
@@ -184,28 +158,35 @@ def patch_crypt_section(path: str, mem_dump: bytes | list, arch: str) -> tuple[s
     dump_bytes = bytes(mem_dump) if not isinstance(mem_dump, (bytes, bytearray)) else mem_dump
     mem_hash = sha256_hex(dump_bytes)
 
-    tmp_path = path + ".tmp"
-    shutil.copy2(path, tmp_path)
+    _, binary = parse_macho(path, arch)
+    enc = binary.encryption_info
+    if enc is None:
+        raise ValueError("Pas de LC_ENCRYPTION_INFO[_64]")
 
+    cryptid_offset = binary.fat_offset + enc.command_offset + ENCRYPTION_INFO_CRYPTID
+
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
     try:
+        os.close(fd)
+        with open(path, "rb") as src, open(tmp_path, "wb") as dst:
+            dst.write(src.read())
+
         with open(tmp_path, "r+b") as f:
-            f.seek(bi.fat_offset + bi.cryptoff)
-            nbw = f.write(dump_bytes)
+            nbw = _patch_crypt_section(f, bi.fat_offset, bi.cryptoff, dump_bytes)
+            _patch_cryptid(f, cryptid_offset)
             f.flush()
             os.fsync(f.fileno())
 
-        if nbw != len(dump_bytes):
-            raise RuntimeError(
-                f"Partial write: {nbw}/{len(dump_bytes)} bytes written"
-            )
-
         after = get_binary_info(tmp_path, arch)
+
         if after.crypt_hash != mem_hash:
             raise RuntimeError(
                 f"Integrity check failed!\n"
                 f"  file crypt section: {after.crypt_hash}\n"
                 f"  memory dump:        {mem_hash}"
             )
+        if after.cryptid != 0:
+            raise RuntimeError(f"cryptid should be 0 after patch, got {after.cryptid}")
 
         os.replace(tmp_path, path)
     except:
@@ -214,6 +195,7 @@ def patch_crypt_section(path: str, mem_dump: bytes | list, arch: str) -> tuple[s
         raise
 
     success(f"Patch applied @ [cyan]{bi.cryptoff:#010x}[/] — [yellow]{nbw}[/] bytes written")
+    success("cryptid zeroed out")
     success("Integrity verified: file crypt section == memory dump")
 
     return mem_hash, after

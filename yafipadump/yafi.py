@@ -22,7 +22,7 @@ from .log import (
 )
 from .shared_types import ModuleMetaDataDict
 from .frida_api import FridaAgentAPI
-from .macho import get_binary_info, patch_cryptid, patch_crypt_section
+from .macho import get_binary_info, patch_binary
 from .disasm import write_dump
 from .report import print_report
 
@@ -183,13 +183,8 @@ class Yafi:
                 f"cryptsize mismatch: file={bi.cryptsize} bytes vs dump={len(data)} bytes"
             )
 
-        # Étape 1 : écrase la zone chiffrée par les octets en clair du dump mémoire
-        mem_hash, bi = patch_crypt_section(binary_path, data, arch)
-        print_report("After Patch Crypt Section", "green", bi, mem_cryptoff, mem_hash)
-
-        # Étape 2 : met cryptid à 0 — seulement si l'intégrité du patch est vérifiée
-        bi = patch_cryptid(binary_path, arch)
-        print_report("After Patch CryptID", "orange1", bi, mem_cryptoff)
+        mem_hash, bi = patch_binary(binary_path, data, arch)
+        print_report("After Patch", "green", bi, mem_cryptoff, mem_hash)
 
         # Validation rapide via `file` — doit afficher "Mach-O 64-bit executable arm64"
         result = subprocess.run(["file", binary_path], capture_output=True, text=True)
